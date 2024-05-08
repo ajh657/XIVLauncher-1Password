@@ -1,56 +1,52 @@
-using System;
-using System.ComponentModel;
-using System.Diagnostics;
+using System.Text;
 using System.Text.RegularExpressions;
-namespace XIVLauncherOnePassword
+using System.Threading.Tasks;
+using CliWrap;
+using CliWrap.Exceptions;
+
+namespace XIVLauncherOnePassword;
+
+public static partial class OPIntegration
 {
-    public static partial class OPIntegration
+    public static async Task<string?> GetAPIKey()
     {
-        public static string? GetAPIKey()
+        var variables = Util.GetEnviromentVariables();
+        var cmd = Cli.Wrap("op").WithArguments($"read \"op://{variables["OP_PERSONAL_VAULT"]}/Final Fantasy XIV/one-time password?attribute=otp\" -n");
+        cmd = cmd.WithEnvironmentVariables(variables);
+        
+        bool isSuccess;
+        var output = new StringBuilder();
+        
+        if (!await ProgramCheck.ProgramExists("op"))
         {
-            var vaultID = Environment.GetEnvironmentVariable("OP_PERSONAL_VAULT");
-
-            var process = new Process
-            {
-                StartInfo = new ProcessStartInfo
-                {
-                    FileName = "op",
-                    Arguments = $"read \"op://{vaultID}/Final Fantasy XIV/one-time password?attribute=otp",
-                    UseShellExecute = false,
-                    RedirectStandardOutput = true,
-                    CreateNoWindow = true
-                }
-            };
-
+            return null;
+        }
+        
+        do
+        {
             try
             {
-                process.Start();
+                output = new StringBuilder();
+                await cmd.WithStandardOutputPipe(PipeTarget.ToStringBuilder(output)).ExecuteAsync();
+                isSuccess = true;
             }
-            catch (Win32Exception)
+            catch (CommandExecutionException)
             {
-                return null;
+                await Task.Delay(500);
+                isSuccess = false;
             }
-
-            var apiKey = process.StandardOutput.ReadLine();
-            if (apiKey == null)
-            {
-                return null;
-            }
-
-            if (!IsValidOTP(apiKey))
-            {
-                return null;
-            }
-
-            return apiKey;
-        }
-
-        private static bool IsValidOTP(string secretKey)
-        {
-            return OTPRegex().IsMatch(secretKey);
-        }
-
-        [GeneratedRegex(@"^[0-9]{1,6}$")]
-        private static partial Regex OTPRegex();
+        } while (!isSuccess);
+        
+        var apiKey = output.ToString();
+        
+        return !IsValidOTP(apiKey) ? null : apiKey;
     }
+    
+    private static bool IsValidOTP(string secretKey)
+    {
+        return OTPRegex().IsMatch(secretKey);
+    }
+    
+    [GeneratedRegex(@"^[0-9]{1,6}$")]
+    private static partial Regex OTPRegex();
 }
